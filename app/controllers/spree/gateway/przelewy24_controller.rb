@@ -33,13 +33,14 @@ module Spree
     # Result from Przelewy24
     def comeback
       @order = Order.find(params[:order_id])
-      @gateway = @order && @order.payments.first.payment_method
+      payment = @order && @order.payments.first
+      @gateway = payment && payment.payment_method
       @response = przelewy24_verify(@gateway,@order,params)
       @amount = 100.0
       @amount = params[:p24_kwota].to_f/100
       result = @response.split("\r\n")
       if result[1] == "TRUE"
-        przelewy24_payment_success(@amount)
+        przelewy24_payment_success(payment, @amount)
         redirect_to gateway_przelewy24_complete_path(:order_id => @order.id, :gateway_id => @gateway.id)
       else
         redirect_to gateway_przelewy24_error_path(:gateway_id => @gateway.id, :order_id => @order.id, :error_code => result[2], :error_descr => result[3])
@@ -94,11 +95,13 @@ module Spree
     end
   
     # Completed payment process
-    def przelewy24_payment_success(amount)
-      @order.payment.started_processing
-      if @order.total.to_f == amount.to_f      
-        @order.payment.complete     
-      end    
+    def przelewy24_payment_success(payment, amount)
+      payment.started_processing
+      payment.amount = amount
+      if @order.total.to_f == amount.to_f
+        payment.complete
+      end
+      @order.update_totals
       
       @order.finalize!
       
