@@ -1,0 +1,25 @@
+<h1>
+    <%= t('przelewy24.error.headline') %>
+</h1>
+
+<p>
+    <%= t('przelewy24.error.content') %>
+</p>
+
+<% if params[:error_code] %>
+  <p>
+    <%= t('przelewy24.error.error_code') %>
+    <%= params[:error_code] %>
+  </p>
+<% end %>
+
+<% if params[:error_descr] %>
+  <p>
+    <%= t('przelewy24.error.error_description') %>
+    <%= Iconv.conv('utf-8', 'ISO-8859-2', params[:error_descr]) %>
+  </p>
+<% end %>
+
+<p>
+ <%= link_to t('przelewy24.error.order_comeback'), order_path(@order), :class => 'continue button primary'%>
+</p>

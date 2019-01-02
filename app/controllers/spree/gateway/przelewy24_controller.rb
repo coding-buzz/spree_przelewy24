@@ -1,10 +1,10 @@
 require 'digest/md5'
 module Spree
   class Gateway::Przelewy24Controller < Spree::BaseController
-    skip_before_filter :verify_authenticity_token, :only => [:comeback, :complete]
+    skip_before_action :verify_authenticity_token, :only => [:comeback, :complete]
     include Spree::Core::ControllerHelpers::Order
-    helper 'spree/store'
-    
+    # helper 'spree/store'
+
     # Show form Przelewy24 for pay
     def show
       @order = Order.find(params[:order_id])
@@ -12,10 +12,10 @@ module Spree
         @gateway = @order.available_payment_methods.find{|x| x.id == params[:gateway_id].to_i }
         @order.payments.destroy_all
         payment = @order.payments.create!(:amount => 0, :payment_method_id => @gateway.id)
-        
+
         @p24_session_id = Time.now.to_f.to_s
         @p24_crc = przelewy24_transaction_crc(@gateway,@order,@p24_session_id)
-    
+
         if @order.blank? || @gateway.blank?
           flash[:error] = I18n.t("invalid_arguments")
           redirect_to :back
@@ -24,12 +24,12 @@ module Spree
         end
       end
     end
-    
+
     def error
       @order = Order.find(params[:order_id])
     end
-    
-  
+
+
     # Result from Przelewy24
     def comeback
       @order = Order.find(params[:order_id])
@@ -46,40 +46,44 @@ module Spree
         redirect_to gateway_przelewy24_error_path(:gateway_id => @gateway.id, :order_id => @order.id, :error_code => result[2], :error_descr => result[3])
       end
     end
-    
+
     # complete the order
-    def complete    
+    def complete
       @order = Order.find(params[:order_id])
-      
+
       session[:order_id]=nil
       if @order.state=="complete"
-        redirect_to order_url(@order, {:checkout_complete => true, :order_token => @order.token}), :notice => I18n.t("payment_success")
+        flash[:order_completed] = true
+        @order.line_items.each do |line_item|
+          Delayed::Job.enqueue UpdateShowroomVariantJob.new(line_item.variant.id)
+        end
+        redirect_to order_url(@order, {:checkout_complete => true, :order_token => @order.guest_token}), :notice => I18n.t("payment_success")
       else
         redirect_to order_url(@order)
       end
     end
-    
-  
-  
+
+
+
     private
-  
+
     # validating dotpay message
-    def przelewy24_transaction_crc(gateway,order,session_id)    
+    def przelewy24_transaction_crc(gateway,order,session_id)
       calc_md5 = Digest::MD5.hexdigest(session_id + "|" +
         (@gateway.preferred_p24_id_sprzedawcy.nil? ? "" : @gateway.preferred_p24_id_sprzedawcy) + "|" +
         (@gateway.p24_amount(@order.total).nil? ? "" : @gateway.p24_amount(@order.total)) + "|" +
         (@gateway.preferred_crc_key.nil? ? "" : @gateway.preferred_crc_key))
-        
+
         return calc_md5
-      
+
     end
-    
+
     def przelewy24_verify(gateway,order,params)
       require 'net/https'
       require 'net/http'
       require 'open-uri'
       require 'openssl'
-      
+
       params_new = {:p24_session_id => params[:p24_session_id], :p24_order_id => params[:p24_order_id], :p24_id_sprzedawcy => gateway.preferred_p24_id_sprzedawcy, :p24_kwota => params[:p24_kwota]}
       params_new[:p24_crc] = Digest::MD5.hexdigest(params[:p24_session_id]+"|"+params[:p24_order_id]+"|"+params[:p24_kwota]+"|"+gateway.preferred_crc_key)
       #params_list = "p24_session_id=#{params_new[:p24_session_id]}&p24_order_id=#{params_new[:p24_session_id]}&p24_id_sprzedawcy=#{params_new[:p24_id_sprzedawcy]}&p24_kwota=#{params_new[:p24_kwota]}&p24_crc=#{params_new[:p24_crc]}"
@@ -93,7 +97,7 @@ module Spree
       response = con.start {|http| http.request(req)}
       return response.body
     end
-  
+
     # Completed payment process
     def przelewy24_payment_success(payment, amount)
       payment.started_processing
@@ -102,25 +106,23 @@ module Spree
         payment.complete
       end
       @order.update_totals
-      
+
       @order.finalize!
-      
+
       @order.next
       @order.next
       @order.save
     end
-  
+
     # payment cancelled by user (dotpay signals 3 to 5)
     def przelewy24_payment_cancel(params)
       @order.cancel
     end
-  
+
     def przelewy24_payment_new(params)
       @order.payment.started_processing
       @order.finalize!
     end
-  
+
   end
 end
-
-
